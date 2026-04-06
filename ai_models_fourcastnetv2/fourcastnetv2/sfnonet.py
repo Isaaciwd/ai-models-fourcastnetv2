@@ -145,6 +145,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         checkpointing=False,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
+        self.checkpointing = checkpointing
 
         # norm layer
         self.norm0 = norm_layer[0]()  # ((h,w))
@@ -203,7 +204,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         if concat_skip and outer_skip is not None:
             self.outer_skip_conv = nn.Conv2d(2 * embed_dim, embed_dim, 1, bias=False)
 
-    def forward(self, x):
+    def _forward(self, x):
         residual = x
 
         x = self.norm0(x)
@@ -235,15 +236,14 @@ class FourierNeuralOperatorBlock(nn.Module):
 
         return x
 
-    # @torch.jit.ignore
-    # def checkpoint_forward(self, x):
-    #     return checkpoint(self._forward, x)
+    @torch.jit.ignore
+    def checkpoint_forward(self, x):
+        return checkpoint(self._forward, x, use_reentrant=False)
 
-    # def forward(self, x):
-    #     if self.checkpointing:
-    #         return self.checkpoint_forward(x)
-    #     else:
-    #         return self._forward(x)
+    def forward(self, x):
+        if self.checkpointing and torch.is_grad_enabled():
+            return self.checkpoint_forward(x)
+        return self._forward(x)
 
 
 class FourierNeuralOperatorNet(nn.Module):

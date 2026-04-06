@@ -165,10 +165,10 @@ class MLP(nn.Module):
 
     @torch.jit.ignore
     def checkpoint_forward(self, x):
-        return checkpoint(self.fwd, x)
+        return checkpoint(self.fwd, x, use_reentrant=False)
 
     def forward(self, x):
-        if self.checkpointing:
+        if self.checkpointing and torch.is_grad_enabled():
             return self.checkpoint_forward(x)
         else:
             return self.fwd(x)

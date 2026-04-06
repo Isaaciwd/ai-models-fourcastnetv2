@@ -1,0 +1,28 @@
+run:
+  lead_time: 24
+
+output:
+  path: ./sensitivity-results.nc
+  summary_path: ./sensitivity-results.json
+
+plotting:
+  enabled: true
+  prefix: ./sensitivity-results
+  top_k: 6
+  area: [60, 200, 10, 280]
+  coastlines: true
+
+targets:
+  - name: west-coast-r850
+    param: r
+    level: 850
+    area: [50, 230, 30, 245]
+    metric: mean-square
+
+  - name: west-coast-t500
+    field: t500
+    area: [50, 230, 30, 245]
+    metric: mean
+
+  - name: full-state-baseline
+    metric: mean-square

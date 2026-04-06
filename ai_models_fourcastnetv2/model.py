@@ -629,7 +629,7 @@ class FourCastNetv2(Model):
             "value": float(total_map[lat_index, lon_index]),
         }
 
-    def add_target_area_patch(self, axes):
+    def add_target_area_patch(self, axes, data_crs=None):
         area = self.plot_area_bounds if self.plot_area_bounds is not None else self.target_area_bounds
         if area is None:
             return
@@ -639,6 +639,10 @@ class FourCastNetv2(Model):
         north, west, south, east = area
         spans = [(west, east)] if west <= east else [(west, 360.0), (0.0, east)]
         for span_west, span_east in spans:
+            patch_kwargs = {}
+            if data_crs is not None:
+                patch_kwargs["transform"] = data_crs
+
             axes.add_patch(
                 patches.Rectangle(
                     (span_west, south),
@@ -648,6 +652,7 @@ class FourCastNetv2(Model):
                     edgecolor="black",
                     linewidth=1.5,
                     linestyle="--",
+                    **patch_kwargs,
                 )
             )
 
@@ -656,24 +661,28 @@ class FourCastNetv2(Model):
             return
 
         try:
-            import cartopy.crs as ccrs
             import cartopy.feature as cfeature
 
             axes.coastlines(color="black", linewidth=0.6)
             axes.add_feature(cfeature.BORDERS, linewidth=0.3)
-            axes.set_global()
-            axes.set_extent([0, 360, -90, 90], crs=ccrs.PlateCarree())
         except Exception:
             if not self._warned_missing_cartopy:
                 LOG.warning("Cartopy is not available; plotting without coastline overlays")
                 self._warned_missing_cartopy = True
 
-    def apply_plot_limits(self, axes):
+    def apply_plot_limits(self, axes, data_crs=None):
         area = self.plot_area_bounds
         if area is None:
             return
 
         north, west, south, east = area
+        if data_crs is not None and hasattr(axes, "set_extent"):
+            if west <= east:
+                axes.set_extent([west, east, south, north], crs=data_crs)
+            else:
+                axes.set_extent([0, 360, south, north], crs=data_crs)
+            return
+
         if west <= east:
             axes.set_xlim(west, east)
         else:
@@ -686,18 +695,42 @@ class FourCastNetv2(Model):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
+        projection = None
+        data_crs = None
+        if self.plot_coastlines:
+            try:
+                import cartopy.crs as ccrs
+
+                projection = ccrs.PlateCarree(central_longitude=180)
+                data_crs = ccrs.PlateCarree()
+            except Exception:
+                if not self._warned_missing_cartopy:
+                    LOG.warning("Cartopy is not available; plotting without coastline overlays")
+                    self._warned_missing_cartopy = True
+
         total_map = _total_sensitivity_map(gradient)
         total_path = f"{self.plot_prefix}-total.png"
         extent = (0.0, 360.0, float(self.latitudes[-1]), float(self.latitudes[0]))
 
-        figure, axes = plt.subplots(figsize=(12, 5))
-        image = axes.imshow(total_map, origin="upper", extent=extent, cmap="magma")
+        if projection is not None:
+            figure, axes = plt.subplots(figsize=(12, 5), subplot_kw={"projection": projection})
+            image = axes.imshow(
+                total_map,
+                origin="upper",
+                extent=extent,
+                cmap="magma",
+                transform=data_crs,
+            )
+        else:
+            figure, axes = plt.subplots(figsize=(12, 5))
+            image = axes.imshow(total_map, origin="upper", extent=extent, cmap="magma")
+
         axes.set_title("Total input sensitivity")
         axes.set_xlabel("Longitude")
         axes.set_ylabel("Latitude")
         self.maybe_add_coastlines(axes)
-        self.add_target_area_patch(axes)
-        self.apply_plot_limits(axes)
+        self.add_target_area_patch(axes, data_crs=data_crs)
+        self.apply_plot_limits(axes, data_crs=data_crs)
         figure.colorbar(image, ax=axes, shrink=0.8, label="Mean absolute gradient")
         figure.tight_layout()
         figure.savefig(total_path, dpi=150)
@@ -710,19 +743,37 @@ class FourCastNetv2(Model):
         top_indices = [channel["index"] for channel in top_channels[:top_count]]
         columns = min(3, top_count)
         rows = math.ceil(top_count / columns)
-        figure, axes = plt.subplots(rows, columns, figsize=(5 * columns, 3.5 * rows), squeeze=False)
+        if projection is not None:
+            figure, axes = plt.subplots(
+                rows,
+                columns,
+                figsize=(5 * columns, 3.5 * rows),
+                squeeze=False,
+                subplot_kw={"projection": projection},
+            )
+        else:
+            figure, axes = plt.subplots(rows, columns, figsize=(5 * columns, 3.5 * rows), squeeze=False)
 
         for axis in axes.ravel()[top_count:]:
             axis.axis("off")
 
         for axis, index in zip(axes.ravel(), top_indices):
-            image = axis.imshow(np.abs(gradient[index]), origin="upper", extent=extent, cmap="viridis")
+            if projection is not None:
+                image = axis.imshow(
+                    np.abs(gradient[index]),
+                    origin="upper",
+                    extent=extent,
+                    cmap="viridis",
+                    transform=data_crs,
+                )
+            else:
+                image = axis.imshow(np.abs(gradient[index]), origin="upper", extent=extent, cmap="viridis")
             axis.set_title(self.ordering[index])
             axis.set_xlabel("Longitude")
             axis.set_ylabel("Latitude")
             self.maybe_add_coastlines(axis)
-            self.add_target_area_patch(axis)
-            self.apply_plot_limits(axis)
+            self.add_target_area_patch(axis, data_crs=data_crs)
+            self.apply_plot_limits(axis, data_crs=data_crs)
             figure.colorbar(image, ax=axis, shrink=0.8)
 
         figure.tight_layout()

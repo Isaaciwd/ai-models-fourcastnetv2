@@ -1,15 +1,14 @@
 # ai-models-fourcastnetv2
 
-`ai-models-fourcastnetv2` is an [ai-models](https://github.com/ecmwf-lab/ai-models) plugin for running the FourCastNet v2 small model, with an extended terminal-first sensitivity workflow.
+`ai-models-fourcastnetv2` is an [ai-models](https://github.com/ecmwf-lab/ai-models) plugin for running the FourCastNet v2 small model.
+
+This fork now keeps model-specific backprop logic in the plugin and delegates reusable sensitivity configuration/output/plotting workflows to the shared `ai-models` sensitivity module.
 
 ## What this fork adds
 
-- Backpropagated forecast sensitivity for `fourcastnetv2-small`.
-- Targeted objectives by variable/level and lat/lon region.
-- Multi-target runs from a single YAML config file.
-- Sensitivity output as NetCDF.
-- JSON run summary with target-level hotspot diagnostics.
-- Plot products for total sensitivity and top input channels.
+- Differentiable rollout and input-gradient computation for `fourcastnetv2-small`.
+- FourCastNet v2 specific target-field resolution and objective assembly.
+- Shared sensitivity UX (YAML, NetCDF, plotting) consumed from `ai-models`.
 
 ## Installation
 
@@ -73,7 +72,7 @@ Each sensitivity run writes:
   - `<prefix>-<target>-total.png`
   - `<prefix>-<target>-top-channels.png`
 
-Output convention is intentionally close to model-input style: structured geospatial arrays on `latitude`/`longitude`, with explicit variable names and per-target metadata.
+Output convention is intentionally close to model-input style: structured geospatial arrays on `latitude`/`longitude`, with explicit variable names and per-target metadata. The format is produced by the shared `ai-models` sensitivity module.
 
 ## Configuration interface
 
@@ -161,3 +160,18 @@ For now, keep this work private and structured as:
 - a private fork of `ai-models` only if/when core framework changes are needed
 
 This keeps the sensitivity feature isolated to the model plugin, minimizes merge burden, and makes future public release easier.
+
+## Architecture note
+
+For this refactor:
+
+- `ai-models-fourcastnetv2` owns model-specific components:
+  - differentiable model rollout
+  - channel/field mapping for FourCastNet v2
+  - model-specific scalar objective tensors
+- `ai-models` owns reusable components:
+  - CLI/YAML sensitivity interface
+  - NetCDF and JSON output writing
+  - plotting and coastline overlays
+
+This separation is intended to make future model support easier without duplicating UI/output logic in each plugin.

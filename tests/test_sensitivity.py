@@ -1,42 +1,23 @@
 import numpy as np
 import torch
 
+from ai_models.sensitivity import parse_target_area
+from ai_models.sensitivity import target_slug
+from ai_models.sensitivity import SensitivityTarget
 from ai_models_fourcastnetv2.fourcastnetv2.sfnonet import FourierNeuralOperatorNet
 from ai_models_fourcastnetv2.model import FourCastNetv2
-from ai_models_fourcastnetv2.model import SensitivityTarget
-from ai_models_fourcastnetv2.model import _parse_target_area
-from ai_models_fourcastnetv2.model import _channel_sensitivity_scores
-from ai_models_fourcastnetv2.model import _total_sensitivity_map
 
 
-def test_channel_sensitivity_scores_reduces_last_two_axes():
-    gradient = np.array(
-        [
-            [[1.0, -3.0], [2.0, -2.0]],
-            [[0.0, 4.0], [0.0, -4.0]],
-        ],
-        dtype=np.float32,
-    )
-
-    scores = _channel_sensitivity_scores(gradient)
-
-    np.testing.assert_allclose(scores, np.array([2.0, 2.0], dtype=np.float32))
+def test_parse_target_area_parses_north_west_south_east():
+    assert parse_target_area("50,230,30,245") == (50.0, 230.0, 30.0, 245.0)
 
 
-def test_channel_sensitivity_scores_accepts_batched_gradients():
-    gradient = np.ones((1, 3, 2, 2), dtype=np.float32)
-
-    scores = _channel_sensitivity_scores(gradient)
-
-    np.testing.assert_allclose(scores, np.ones(3, dtype=np.float32))
+def test_parse_target_area_accepts_sequence():
+    assert parse_target_area([50, 230, 30, 245]) == (50.0, 230.0, 30.0, 245.0)
 
 
-def test_total_sensitivity_map_reduces_channel_axis():
-    gradient = np.ones((1, 3, 2, 2), dtype=np.float32)
-
-    total_map = _total_sensitivity_map(gradient)
-
-    np.testing.assert_allclose(total_map, np.ones((2, 2), dtype=np.float32))
+def test_target_slug_sanitizes_string():
+    assert target_slug("R850 West Coast", "fallback") == "r850-west-coast"
 
 
 def test_parse_model_args_accepts_sensitivity_options():
@@ -58,49 +39,6 @@ def test_parse_model_args_accepts_sensitivity_options():
     assert args.sensitivity_path == "sens.nc"
     assert args.model_checkpointing is True
     assert args.rollout_checkpointing is False
-
-
-def test_parse_model_args_accepts_target_options():
-    model = FourCastNetv2.__new__(FourCastNetv2)
-    args = model.parse_model_args(
-        [
-            "--target-param",
-            "r",
-            "--target-level",
-            "850",
-            "--target-area",
-            "50,230,30,245",
-        ]
-    )
-
-    assert args.target_param == "r"
-    assert args.target_level == 850
-    assert args.target_area == "50,230,30,245"
-
-
-def test_parse_model_args_accepts_config_and_summary_options():
-    model = FourCastNetv2.__new__(FourCastNetv2)
-    args = model.parse_model_args(
-        [
-            "--sensitivity-config",
-            "sensitivity.yaml",
-            "--summary-path",
-            "summary.json",
-        ]
-    )
-
-    assert args.sensitivity_config == "sensitivity.yaml"
-    assert args.summary_path == "summary.json"
-
-
-def test_parse_target_area_parses_north_west_south_east():
-    assert _parse_target_area("50,230,30,245") == (50.0, 230.0, 30.0, 245.0)
-
-
-def test_target_name_sanitizes_string():
-    from ai_models_fourcastnetv2.model import _target_name
-
-    assert _target_name("R850 West Coast", "fallback") == "r850-west-coast"
 
 
 def test_default_target_resolves_pressure_level_param():
@@ -184,10 +122,6 @@ def test_config_targets_reject_invalid_metric():
         assert "Unsupported metric" in str(exc)
     else:
         raise AssertionError("Expected ValueError for invalid target metric")
-
-
-def test_parse_target_area_accepts_sequence():
-    assert _parse_target_area([50, 230, 30, 245]) == (50.0, 230.0, 30.0, 245.0)
 
 
 def test_small_fft_model_supports_backward_with_checkpointing():

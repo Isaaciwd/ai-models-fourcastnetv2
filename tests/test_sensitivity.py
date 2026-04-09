@@ -29,6 +29,7 @@ def test_parse_model_args_accepts_sensitivity_options():
             "mean",
             "--sensitivity-path",
             "sens.nc",
+            "--plot-signed-gradients",
             "--model-checkpointing",
             "--no-rollout-checkpointing",
         ]
@@ -37,6 +38,7 @@ def test_parse_model_args_accepts_sensitivity_options():
     assert args.sensitivity is True
     assert args.sensitivity_metric == "mean"
     assert args.sensitivity_path == "sens.nc"
+    assert args.plot_signed_gradients is True
     assert args.model_checkpointing is True
     assert args.rollout_checkpointing is False
 
@@ -145,3 +147,24 @@ def test_small_fft_model_supports_backward_with_checkpointing():
 
     assert gradient.shape == state.shape
     assert torch.isfinite(gradient).all()
+
+
+def test_forecast_step_count_uses_lead_time_hours():
+    model = FourCastNetv2.__new__(FourCastNetv2)
+    model.hour_steps = 6
+    model.lead_time = 48
+
+    assert model.forecast_step_count() == 8
+
+
+def test_forecast_step_count_rejects_non_multiple():
+    model = FourCastNetv2.__new__(FourCastNetv2)
+    model.hour_steps = 6
+    model.lead_time = 50
+
+    try:
+        model.forecast_step_count()
+    except ValueError as exc:
+        assert "multiple of 6" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for non-multiple lead_time")

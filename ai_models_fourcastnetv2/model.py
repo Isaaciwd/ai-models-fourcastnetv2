@@ -364,12 +364,22 @@ class FourCastNetv2(Model):
                 np.amax(output[:, channel]),
             )
 
+    def forecast_step_count(self):
+        if self.lead_time <= 0:
+            raise ValueError(f"lead_time must be positive, got {self.lead_time}")
+        if self.lead_time % self.hour_steps != 0:
+            raise ValueError(
+                f"For FourCastNet v2, lead_time must be a multiple of {self.hour_steps} hours; got {self.lead_time}"
+            )
+        return self.lead_time // self.hour_steps
+
     def run_forecast(self, model, input_state):
+        forecast_steps = self.forecast_step_count()
         state = input_state
 
         with torch.inference_mode():
             with self.stepper(self.hour_steps) as stepper:
-                for forecast_index in range(self.lead_time // self.hour_steps):
+                for forecast_index in range(forecast_steps):
                     output = self.model_step(model, state)
                     state = output
 
@@ -391,12 +401,13 @@ class FourCastNetv2(Model):
                     stepper(forecast_index, step)
 
     def run_sensitivity(self, model, input_state):
+        forecast_steps = self.forecast_step_count()
         input_state = input_state.requires_grad_(True)
         state = self.normalise(input_state)
         objective_state = None
 
         with self.stepper(self.hour_steps) as stepper:
-            for forecast_index in range(self.lead_time // self.hour_steps):
+            for forecast_index in range(forecast_steps):
                 output = self.model_step(model, state)
                 state = output
 

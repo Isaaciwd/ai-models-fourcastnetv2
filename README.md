@@ -1,177 +1,188 @@
 # ai-models-fourcastnetv2
 
-`ai-models-fourcastnetv2` is an [ai-models](https://github.com/ecmwf-lab/ai-models) plugin for running the FourCastNet v2 small model.
+`ai-models-fourcastnetv2` is an `ai-models` plugin that adds the `fourcastnetv2-small` model.
 
-This fork now keeps model-specific backprop logic in the plugin and delegates reusable sensitivity configuration/output/plotting workflows to the shared `ai-models` sensitivity module.
+This fork also supports gradient-based sensitivity analysis (backpropagation from forecast outputs to input fields).
 
-## What this fork adds
+## Install
 
-- Differentiable rollout and input-gradient computation for `fourcastnetv2-small`.
-- FourCastNet v2 specific target-field resolution and objective assembly.
-- Shared sensitivity UX (YAML, NetCDF, plotting) consumed from `ai-models`.
-
-## Installation
+Install core + plugin:
 
 ```bash
-pip install ai-models-fourcastnetv2
+pip install ai-models ai-models-fourcastnetv2
 ```
 
-For local development:
+For local development from sibling repos:
 
 ```bash
 pip install -e ./ai-models -e ./ai-models-fourcastnetv2
 ```
 
-Optional plotting extras:
-
-- `matplotlib` for PNG output.
-- `cartopy` for coastline overlays. If missing, plots are still produced without coastlines.
-
-## Quick start
-
-Single target from CLI flags:
+Verify model is available:
 
 ```bash
-ai-models --input cds --date 20230110 --time 0000 --lead-time 24 \
-  fourcastnetv2-small --sensitivity \
-  --target-param r --target-level 850 --target-area 50,230,30,245 \
-  --sensitivity-path ./sensitivity-r850-west-coast-24h.nc
+ai-models --models
 ```
 
-YAML-driven multi-target run:
+You should see `fourcastnetv2-small`.
+
+## Fastest Way to Run
+
+Use one YAML file and run:
 
 ```bash
-ai-models --input cds --date 20230110 --time 0000 fourcastnetv2-small \
-  --sensitivity-config ./examples/sensitivity-config.example.yaml
+ai-models --yaml ./examples/sensitivity-config.example.yaml
 ```
 
-Note: when `--sensitivity-config` is provided, sensitivity mode is enabled automatically.
+## Minimal YAML (Forecast + Sensitivity)
+
+```yaml
+model: fourcastnetv2-small
+
+run:
+  input: cds
+  output: none
+  date: 20230110
+  time: 0000
+  lead_time: 24
+  only_gpu: true
+
+runtime:
+  assets_dir: ./assets/fourcastnetv2-small
+
+output:
+  path: ./sensitivity-results.nc
+  summary_path: ./sensitivity-results.json
+
+plotting:
+  enabled: true
+  prefix: ./sensitivity-results
+  top_k: 6
+
+targets:
+  - name: west-coast-r850
+    param: r
+    level: 850
+    area: [50, 230, 30, 245]
+    metric: mean-square
+```
+
+Full example file: `examples/sensitivity-config.example.yaml`.
+
+## What Date Means
+
+- `run.date` + `run.time` is the forecast start (initial condition)
+- `run.lead_time` is hours forward to target
+- sensitivity is backpropagated from the final forecast time (`start + lead_time`) to the input state
+
+Example: `date=20230101`, `time=0000`, `lead_time=48` means forecast target at `2023-01-03 00:00`.
 
 ## Outputs
 
-Each sensitivity run writes:
+A sensitivity run writes:
 
-- NetCDF (`.nc`) with dimensions:
-  - `target`
-  - `channel`
-  - `latitude`
-  - `longitude`
-- Data variables:
+- NetCDF file (`output.path`) with:
   - `sensitivity[target, channel, latitude, longitude]`
   - `channel_score[target, channel]`
   - `total_sensitivity[target, latitude, longitude]`
   - `objective[target]`
-  - `target_area[target, area_coord]`
-- Coordinates:
-  - `target` (target names)
-  - `channel` (input state channels)
-  - `latitude`, `longitude`
-  - `target_field`, `target_metric`
-- JSON summary (`.json`) with per-target objective values, peak locations, and top channels.
-- PNG plots (if enabled):
+- JSON summary (`output.summary_path`) with per-target top channels and peak sensitivity location
+- PNG plots (if enabled), for each target:
   - `<prefix>-<target>-total.png`
   - `<prefix>-<target>-top-channels.png`
+  - optional signed versions when enabled
 
-Output convention is intentionally close to model-input style: structured geospatial arrays on `latitude`/`longitude`, with explicit variable names and per-target metadata. The format is produced by the shared `ai-models` sensitivity module.
+Plot titles include:
 
-## Configuration interface
+- lead time
+- backpropagation target datetime (forecast valid time)
 
-### Recommended workflow
+## Targets
 
-Use a YAML config for production/reproducible runs and reserve CLI flags for quick one-off experiments.
+Each `targets[]` entry defines one scalar objective and produces one sensitivity result set.
 
-### Config schema
+Field-specific target:
 
-Top-level keys:
+```yaml
+- name: west-coast-t500
+  field: t500
+  area: [50, 230, 30, 245]
+  metric: mean
+```
 
-- `run`
-  - `lead_time` (hours)
-- `output`
-  - `path` (NetCDF sensitivity output path)
-  - `summary_path` (JSON summary path)
-- `plotting`
-  - `enabled` (bool)
-  - `prefix` (plot filename prefix)
-  - `top_k` (number of channel maps in panel plot, must be non-negative)
-  - `area` (`[north, west, south, east]`)
-  - `coastlines` (bool, requires cartopy)
-- `targets` (list)
-  - `name` (identifier used in outputs)
-  - one of:
-    - `field` (e.g. `r850`, `t500`, `2t`)
-    - `param` + `level` (e.g. `r` + `850`)
-  - optional `area` (`[north, west, south, east]`)
-  - optional `metric` (`mean` or `mean-square`)
+Param+level target:
 
-### Example config
+```yaml
+- name: west-coast-r850
+  param: r
+  level: 850
+  area: [50, 230, 30, 245]
+  metric: mean-square
+```
 
-See: `examples/sensitivity-config.example.yaml`
+Full-state target (all channels):
 
-## CLI reference
+```yaml
+- name: full-state-baseline
+  metric: mean-square
+```
 
-Sensitivity controls:
+## YAML Keys Reference
 
-- `--sensitivity`
-- `--sensitivity-config FILE`
-- `--sensitivity-metric {mean,mean-square}`
-- `--sensitivity-path FILE` (NetCDF output)
-- `--summary-path FILE`
+Top-level keys used by this plugin:
 
-Single-target controls (used directly when no config is supplied):
+- `model`: should be `fourcastnetv2-small`
+- `run`:
+  - `input`, `output`, `date`, `time`, `lead_time`, `only_gpu`
+  - `model_checkpointing`, `rollout_checkpointing` (memory/perf controls)
+- `runtime`:
+  - `assets_dir`
+  - `omp_num_threads`, `mkl_num_threads`, `mpl_backend`
+  - `run_dir` (used by wrapper scripts)
+- `output`:
+  - `path`, `summary_path`
+- `plotting`:
+  - `enabled`, `prefix`, `top_k`, `area`, `coastlines`, `signed_gradients`
+- `targets`: list of target definitions
+- `cli` (optional): advanced mapping to extra ai-models options
 
-- `--target-field FIELD`
-- `--target-param PARAM`
-- `--target-level LEVEL`
-- `--target-area N,W,S,E`
+Notes:
 
-Plot controls:
+- `plotting.area` must be `null` or a 4-value list `[north, west, south, east]`
+- `date` accepts `YYYYMMDD` or `YYYY-MM-DD`
+- `time` accepts `HHMM` or `HH:MM`
 
-- `--plot-sensitivity` / `--no-plot-sensitivity`
-- `--plot-top-k N`
-- `--plot-prefix PREFIX`
-- `--plot-area N,W,S,E`
-- `--plot-coastlines` / `--no-plot-coastlines`
+## Optional Dependencies
 
-Performance controls:
+- `matplotlib` for plot output
+- `cartopy` for coastlines/borders overlay (plots still work without it)
 
-- `--model-checkpointing` / `--no-model-checkpointing`
-- `--rollout-checkpointing` / `--no-rollout-checkpointing`
+## Minimal PBS Script Example
 
-## Notes and caveats
+```bash
+#!/bin/bash -l
+#PBS -N fcnetv2-sens
+#PBS -l select=1:ncpus=8:ngpus=1:mem=64GB:gpu_type=a100
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -q casper
+#PBS -A P93300042
 
-- This implementation currently targets native FourCastNet v2 output fields. Derived diagnostics (for example specific humidity) can be added in a follow-up.
-- Forecast and sensitivity can still run without plotting dependencies.
-- Coastline overlays are optional and degrade gracefully if cartopy is unavailable.
-- If cartopy is not installed and coastlines are requested, the run logs a warning and continues.
+set -euo pipefail
+cd /path/to/workdir
+
+/path/to/miniconda3/condabin/conda run -n ai-models-gfs \
+  ai-models --yaml ./sensitivity-config.yaml
+```
 
 ## Development
 
-Run tests:
+Run plugin tests:
 
 ```bash
 pytest ai-models-fourcastnetv2/tests -q
 ```
 
-## Repository strategy (recommended)
+## License
 
-For now, keep this work private and structured as:
-
-- a private fork of `ai-models-fourcastnetv2` (primary code here)
-- a private fork of `ai-models` only if/when core framework changes are needed
-
-This keeps the sensitivity feature isolated to the model plugin, minimizes merge burden, and makes future public release easier.
-
-## Architecture note
-
-For this refactor:
-
-- `ai-models-fourcastnetv2` owns model-specific components:
-  - differentiable model rollout
-  - channel/field mapping for FourCastNet v2
-  - model-specific scalar objective tensors
-- `ai-models` owns reusable components:
-  - CLI/YAML sensitivity interface
-  - NetCDF and JSON output writing
-  - plotting and coastline overlays
-
-This separation is intended to make future model support easier without duplicating UI/output logic in each plugin.
+Apache License 2.0. See `LICENSE` and `LICENSE_FourCastNetv2`.

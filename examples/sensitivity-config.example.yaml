@@ -1,5 +1,19 @@
+model: fourcastnetv2-small
+
 run:
+  input: cds
+  output: none
+  only_gpu: true
+  date: 20230110
+  time: 0000
   lead_time: 24
+
+runtime:
+  run_dir: "{repo_root}/fourcastnetv2-runs/{job_id}"
+  assets_dir: "{repo_root}/assets/fourcastnetv2-small"
+  omp_num_threads: 1
+  mkl_num_threads: 1
+  mpl_backend: Agg
 
 output:
   path: ./sensitivity-results.nc
@@ -11,6 +25,7 @@ plotting:
   top_k: 6
   area: [60, 200, 10, 280]
   coastlines: true
+  signed_gradients: true
 
 targets:
   - name: west-coast-r850

@@ -43,6 +43,24 @@ def test_parse_model_args_accepts_sensitivity_options():
     assert args.rollout_checkpointing is False
 
 
+def test_parse_model_args_accepts_integrated_gradients_options():
+    model = FourCastNetv2.__new__(FourCastNetv2)
+    args = model.parse_model_args(
+        [
+            "--attribution-method",
+            "integrated-gradients",
+            "--ig-steps",
+            "12",
+            "--ig-baseline",
+            "climatology",
+        ]
+    )
+
+    assert args.attribution_method == "integrated-gradients"
+    assert args.ig_steps == 12
+    assert args.ig_baseline == "climatology"
+
+
 def test_default_target_resolves_pressure_level_param():
     model = FourCastNetv2.__new__(FourCastNetv2)
     model.target_field = None
@@ -147,6 +165,48 @@ def test_small_fft_model_supports_backward_with_checkpointing():
 
     assert gradient.shape == state.shape
     assert torch.isfinite(gradient).all()
+
+
+def test_integrated_gradients_baseline_zero():
+    model = FourCastNetv2.__new__(FourCastNetv2)
+    model.ig_baseline = "zero"
+    x = torch.randn(1, 4, 8, 8)
+
+    baseline = model.integrated_gradients_baseline(x)
+
+    assert torch.allclose(baseline, torch.zeros_like(x))
+
+
+def test_integrated_gradients_baseline_climatology():
+    model = FourCastNetv2.__new__(FourCastNetv2)
+    model.ig_baseline = "climatology"
+    model.means = np.ones((1, 4, 1, 1), dtype=np.float32) * 2.5
+    x = torch.randn(1, 4, 8, 8)
+
+    baseline = model.integrated_gradients_baseline(x)
+
+    assert baseline.shape == x.shape
+    assert torch.allclose(baseline[:, :, 0, 0], torch.full((1, 4), 2.5))
+
+
+def test_integrated_gradients_linear_model_matches_expectation():
+    model = FourCastNetv2.__new__(FourCastNetv2)
+    model.ig_steps = 16
+    model.ig_baseline = "zero"
+
+    linear = torch.nn.Conv2d(2, 1, kernel_size=1, bias=False)
+    with torch.no_grad():
+        linear.weight[:] = torch.tensor([[[[3.0]], [[-2.0]]]])
+
+    x = torch.randn(1, 2, 4, 4)
+
+    def objective_fn(inputs):
+        return linear(inputs).sum()
+
+    attribution = model.integrated_gradients(linear, x, objective_fn)
+    expected = x * torch.tensor([3.0, -2.0]).view(1, 2, 1, 1)
+
+    assert torch.allclose(attribution, expected, atol=1e-4, rtol=1e-4)
 
 
 def test_forecast_step_count_uses_lead_time_hours():

@@ -116,6 +116,7 @@ class FourCastNetv2(Model):
     ]
 
     expver = "sfno"
+    supported_attribution_methods = ("gradient", "integrated-gradients")
 
     def __init__(self, precip_flag=False, **kwargs):
         super().__init__(**kwargs)
@@ -315,6 +316,48 @@ class FourCastNetv2(Model):
 
         return weights / weights.sum()
 
+    def integrated_gradients_baseline(self, input_state):
+        baseline_mode = getattr(self, "ig_baseline", "zero")
+        if baseline_mode == "zero":
+            return torch.zeros_like(input_state)
+
+        if baseline_mode == "climatology":
+            # Means are shape (1, C, 1, 1) and broadcast to input_state shape.
+            baseline = torch.as_tensor(self.means, device=input_state.device, dtype=input_state.dtype)
+            return baseline.expand_as(input_state)
+
+        raise ValueError(f"Unsupported integrated gradients baseline: {baseline_mode}")
+
+    def integrated_gradients(self, model, input_state, objective_fn):
+        steps = int(self.ig_steps)
+        baseline = self.integrated_gradients_baseline(input_state).detach()
+        delta = input_state - baseline
+        accum = torch.zeros_like(input_state)
+
+        for step in range(1, steps + 1):
+            alpha = float(step) / float(steps)
+            interpolated = (baseline + alpha * delta).detach().requires_grad_(True)
+            objective = objective_fn(interpolated)
+            gradient = torch.autograd.grad(objective, interpolated)[0]
+            accum = accum + gradient
+
+        average_gradient = accum / float(steps)
+        return delta * average_gradient
+
+    def _objective_from_input(self, model, input_state, forecast_steps):
+        state = self.normalise(input_state)
+        objective_state = None
+
+        for _ in range(forecast_steps):
+            output = self.model_step(model, state)
+            state = output
+            objective_state = output
+
+        if objective_state is None:
+            raise ValueError("Sensitivity rollout produced no prediction steps")
+
+        return objective_state
+
     def sensitivity_objective(self, output, target):
         metric = target.metric
 
@@ -436,14 +479,34 @@ class FourCastNetv2(Model):
 
         gradients = []
         objective_values = []
-        for index, objective in enumerate(objectives):
-            gradient = torch.autograd.grad(
-                objective,
-                input_state,
-                retain_graph=(index < len(objectives) - 1),
-            )[0]
-            gradients.append(gradient.detach().cpu().numpy())
-            objective_values.append(float(objective.detach().cpu()))
+        if self.attribution_method == "gradient":
+            for index, objective in enumerate(objectives):
+                gradient = torch.autograd.grad(
+                    objective,
+                    input_state,
+                    retain_graph=(index < len(objectives) - 1),
+                )[0]
+                gradients.append(gradient.detach().cpu().numpy())
+                objective_values.append(float(objective.detach().cpu()))
+        elif self.attribution_method == "integrated-gradients":
+
+            def make_objective_function(target):
+                def objective_fn(interpolated_input):
+                    output_state = self._objective_from_input(model, interpolated_input, forecast_steps)
+                    self.sensitivity_manager.current_target = target
+                    return self.sensitivity_manager.objective(output_state, target)
+
+                return objective_fn
+
+            for target in self.sensitivity_manager.targets:
+                self.sensitivity_manager.current_target = target
+                objective_fn = make_objective_function(target)
+                attribution = self.integrated_gradients(model, input_state.detach(), objective_fn)
+                objective = objective_fn(input_state)
+                gradients.append(attribution.detach().cpu().numpy())
+                objective_values.append(float(objective.detach().cpu()))
+        else:
+            raise ValueError(f"Unsupported attribution method: {self.attribution_method}")
 
         stacked_gradients = np.stack(gradients, axis=0)
         self.sensitivity_manager.save(stacked_gradients, objective_values)

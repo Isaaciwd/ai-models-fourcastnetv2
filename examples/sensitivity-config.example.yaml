@@ -7,6 +7,11 @@ run:
   date: 20230110
   time: 0000
   lead_time: 24
+  # attribution_method: gradient
+  # attribution_method: integrated-gradients
+  # ig_steps: 16
+  # ig_baseline: zero
+  # ig_baseline: climatology
 
 runtime:
   run_dir: "{repo_root}/fourcastnetv2-runs/{job_id}"
